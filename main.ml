@@ -47,15 +47,70 @@ let from_data = function
    the next post available. At the moment we just get the author and the date
    it was posted on. *)
 
+let reify_color = function
+  | "f4ac00" -> "yellow"
+  | "f77400" -> "orange"
+  | "ed6161" -> "fuschia"
+  | "d50000" -> "red"
+  | "maroon" -> "maroon"
+  | "5e432d" -> "brown"
+  | "purple" -> "purple"
+  | "navy" -> "navy"
+  | "2b2be4" -> "blue"
+  | "5577bc" -> "lightblue"
+  | "teal" -> "teal"
+  | "219c5a" -> "lightgreen"
+  | "006f00" -> "green"
+  | "olive" -> "olive"
+  | "gray" -> "gray"
+  | "5a5a5a" -> "darkgray"
+  | _ -> failwith "*** Error: unexpected font color"
+
+let reify_div = function
+  | "quote" -> "quote"
+  | "limg" -> "fleft"
+  | "rimg" -> "fright"
+  | div -> failwith "*** Error: unexpected div class (" ^ div ^ ")"
+
+let in_brackets str = "[" ^ str ^ "]" , "[/" ^ str ^ "]"
+
+let reify_bbcode el args =
+  match el with
+  | "br" -> "\n" , ""
+  | "b" | "i" | "u" | "strike" | "pre" | "center" -> in_brackets el
+  | "a" -> "[url=" ^ List.assoc "href" args ^ "]" , "[/url]"
+  | "p" -> in_brackets (List.assoc "align" args)
+  | "div" ->
+    let div = List.assoc "class" args in
+    if div = "left" || div = "right" then in_brackets div else "" , ""
+  | "font" -> in_brackets (reify_color (List.assoc "color" args))
+  | "img" ->
+      begin try List.assoc "alt" args , ""
+      with Not_found -> "[img]" ^ List.assoc "src" args ^ "[/img]" , "" end
+  | _  -> "" , ""
+
+let rec revert_bbcode acc = function
+  | Nethtml.Element ("div" , [] , children) :: tl ->
+    (* DEAL WITH SPOILERS *) revert_bbcode (revert_bbcode acc children) tl
+  | Nethtml.Element (el , args , children) :: tl ->
+     let start , finish = reify_bbcode el args in
+     revert_bbcode (finish :: revert_bbcode (start :: acc) children) tl
+  | Nethtml.Data s :: tl -> revert_bbcode (s :: acc) tl
+  | [] -> acc
+
+
 let get_post html =
   let auth_box = find_element "td" [ "class" , "forum-cartouche" ] [ html ]  in
   let author   = from_data (following [ Skip "a" ; Rec "p" ; Rec "a" ]  auth_box) in
   let date     = from_data (following [ Skip "a" ; Skip "p" ; Rec "p" ] auth_box) in
-  let msg_box  = find_element "td" [ "class" , "forum-message" ] [ html ] in
-  { author ; date ; content = "" }
+  let msg_box  =
+    find_element "div" []
+    [ find_element "td" [ "class" , "forum-message" ] [ html ] ] in
+  let content = String.concat "" (List.rev (revert_bbcode [] msg_box)) in
+  { author ; date ; content }
 
 (* Load the HTML document. *)
-let channel = new Netchannels.input_channel (open_in "page1.html")
+let channel = new Netchannels.input_channel (open_in "page2.html")
 let html = Nethtml.parse channel
 let () = channel#close_in ()
 
@@ -71,7 +126,9 @@ let () =
     | [] -> ()
     | _  ->
       let post = get_post posts in
-      print_string (post.author ^ "\n" ^ post.date ^ "\n") ;
+      print_string
+         ( "[b]Auteur originel :[/b] "^ post.author ^ "\n[b]Date de publication :[/b] "
+         ^ post.date ^ "\n\n" ^ post.content ^ "\n\n\n\n") ;
       (* Why the FUCK do we need three List.tl? 2 should be enough to
          skip the two <tr> constructor (the current post and its footer)
          present before the next post... *)
